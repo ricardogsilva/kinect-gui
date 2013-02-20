@@ -13,7 +13,8 @@ import SimpleCV as scv
 import pygame
 import numpy
 import qimage2ndarray
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPolygon
+from shapely.prepared import prep
 import OSC
 import ui_kinectdlg
 
@@ -36,10 +37,9 @@ class Detector(object):
         self.detector = scv.Kinect()
         im, dep = self.capture()
         self.grid = []
-        if im is not None:
-            for x in range(0, im.width+1, grid_spacing):
-                for y in range(0, im.height+1, grid_spacing):
-                    self.grid.append(Point(x, y))
+        for x in range(0, im.width+1, grid_spacing):
+            for y in range(0, im.height+1, grid_spacing):
+                self.grid.append(Point(x, y))
 
     def capture(self, image_type='image'):
         the_image = None
@@ -78,9 +78,11 @@ class Detector(object):
                                 lower_threshold=0, 
                                 upper_threshold=255, 
                                 get_centroids=True,
-                                get_grid_points=True):
+                                get_grid_points=True,
+                                get_boundaries=True):
         centroids = None
         grid_points = None
+        boundaries = None
         blobs_qim = None
         detected = self._pre_process(depth, lower_threshold, upper_threshold)
         blobs = detected.findBlobs()
@@ -89,20 +91,42 @@ class Detector(object):
                 centroids = self._get_centroids(blobs)
             if get_grid_points:
                 grid_points = self._get_grid_points(blobs)
+            if get_boundaries:
+                boundaries = self._get_boundary_points(blobs)
+                if len(boundaries) == 0:
+                    boundaries = None
             blobs_qim = self._get_qimage_from_blobs(blobs, detected)
-        return (detected, blobs_qim, centroids, grid_points)
+        return (detected, blobs_qim, centroids, grid_points, boundaries)
 
     def _get_centroids(self, blobs):
         return [b.centroid() for b in blobs]
 
     def _get_grid_points(self, blobs):
-        grid_points = []
+        polygons = MultiPolygon([Polygon(b.contour()) for b in blobs])
+        prepared = prep(polygons)
+        grid_points = filter(prepared.contains, self.grid)
+        return grid_points
+
+    def _get_boundary_points(self, blobs):
+        '''
+        Inputs:
+            blobs - a SimpleCV.Features.Features.FeatureSet
+
+        Returns a list of lists with shapely.Point points that are on
+        a simplified boundary for each blob.
+        '''
+
+        boundaries = []
         for b in blobs:
             pol = Polygon(b.contour())
-            for pt in self.grid:
-                if pol.contains(pt):
-                    grid_points.append(pt)
-        return grid_points
+            simpler = pol.simplify(tolerance=0.5, preserve_topology=False)
+            if simpler.type == 'Polygon' and simpler.exterior is not None:
+                blob_boundary = []
+                points = list(simpler.exterior.coords)
+                for pt in list(simpler.exterior.coords):
+                    blob_boundary.append(Point(pt[0], pt[1]))
+                boundaries.append(blob_boundary)
+        return boundaries
 
     def process_image_detection(self, image):
         return image
@@ -121,6 +145,7 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
         self.overlay_blobs = False
         self.overlay_centroids = False
         self.overlay_grid_points = False
+        self.overlay_boundary_points = False
         self.detector = detector
         self.painter = QPainter()
         self.connect(self.image_rb, SIGNAL('toggled(bool)'),
@@ -135,6 +160,8 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
                      self.toggle_overlay_centroids)
         self.connect(self.grid_cb, SIGNAL('toggled(bool)'),
                      self.toggle_overlay_grid_points)
+        self.connect(self.boundaries_cb, SIGNAL('toggled(bool)'),
+                     self.toggle_overlay_boundary_points)
         self.connect(self.min_hslider, SIGNAL('valueChanged(int)'),
                      self.update_slider_labels)
         self.connect(self.max_hslider, SIGNAL('valueChanged(int)'),
@@ -165,6 +192,12 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
         else:
             self.overlay_grid_points = False
 
+    def toggle_overlay_boundary_points(self, toggled):
+        if toggled:
+            self.overlay_boundary_points = True
+        else:
+            self.overlay_boundary_points = False
+
     def toggle_output_image(self, toggled):
         if self.image_rb.isChecked():
             self.display = 'image'
@@ -175,13 +208,14 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
 
     def timerEvent(self, event):
         image, depth = self.capture_raw()
-        out_image, blobs, centroids, pts = self.update_depth_detection(depth)
+        detected = self.update_depth_detection(depth)
+        out_image, blobs, centroids, grid, boundaries = detected
         if self.display == 'image':
-            to_display = (image, blobs, centroids, pts)
+            to_display = (image, blobs, centroids, grid, boundaries)
         elif self.display == 'depth':
-            to_display = (depth, blobs, centroids, pts)
+            to_display = (depth, blobs, centroids, grid, boundaries)
         elif self.display == 'output':
-            to_display = (out_image, blobs, centroids, pts)
+            to_display = (out_image, blobs, centroids, grid, boundaries)
         self.update_display(*to_display)
 
     def capture_raw(self):
@@ -194,7 +228,8 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
                                                      self.overlay_centroids, 
                                                      self.overlay_grid_points)
 
-    def update_display(self, output_image, blobs, centroids, points):
+    def update_display(self, output_image, blobs, centroids, 
+                       points, boundaries):
         out_qim = QImage(output_image.toString(), output_image.width,
                     output_image.height, 3*output_image.width,
                     QImage.Format_RGB888)
@@ -229,7 +264,19 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
                 pt = QPoint(int(p.x), int(p.y))
                 self.painter.drawEllipse(pt, grid_size, grid_size)
             self.painter.end()
-
+        if self.overlay_boundary_points and boundaries is not None:
+            boundary_color = QColor(255, 255, 0)
+            boundary_point_size = 2
+            brush = QBrush(boundary_color)
+            self.painter.begin(pixmap)
+            self.painter.setPen(boundary_color)
+            self.painter.setBrush(brush)
+            for boundary in boundaries:
+                for point in boundary:
+                    pt = QPoint(int(point.x), int(point.y))
+                    self.painter.drawEllipse(pt, boundary_point_size,
+                                             boundary_point_size)
+            self.painter.end()
         self.image_label.setPixmap(pixmap)
 
     def update_slider_labels(self, value=None):
@@ -245,8 +292,6 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
         for index, c in enumerate(centroids):
             address = '/'.join((base_address, index, 'xy'))
             self.osc_client.send_message(address, c[0], c[1])
-            
-
 
 
 if __name__ == '__main__':

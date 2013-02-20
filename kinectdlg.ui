@@ -13,9 +13,9 @@
   <property name="windowTitle">
    <string>Dialog</string>
   </property>
-  <layout class="QGridLayout" name="gridLayout">
-   <item row="0" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout_2">
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
       <widget class="QLabel" name="label">
        <property name="font">
@@ -25,7 +25,7 @@
         </font>
        </property>
        <property name="text">
-        <string>Base image</string>
+        <string>Base image:</string>
        </property>
       </widget>
      </item>
@@ -65,15 +65,15 @@
      </item>
     </layout>
    </item>
-   <item row="1" column="0">
+   <item>
     <widget class="Line" name="line_3">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
     </widget>
    </item>
-   <item row="2" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout_3">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_2">
      <item>
       <widget class="QLabel" name="label_5">
        <property name="font">
@@ -83,7 +83,7 @@
         </font>
        </property>
        <property name="text">
-        <string>Features</string>
+        <string>Features:</string>
        </property>
       </widget>
      </item>
@@ -109,6 +109,13 @@
       </widget>
      </item>
      <item>
+      <widget class="QCheckBox" name="boundaries_cb">
+       <property name="text">
+        <string>Boundaries</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer_2">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
@@ -123,15 +130,15 @@
      </item>
     </layout>
    </item>
-   <item row="3" column="0">
+   <item>
     <widget class="Line" name="line_2">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
     </widget>
    </item>
-   <item row="4" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout_4">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_3">
      <item>
       <widget class="QLabel" name="label_4">
        <property name="font">
@@ -141,7 +148,7 @@
         </font>
        </property>
        <property name="text">
-        <string>Depth filter</string>
+        <string>Depth filter:</string>
        </property>
       </widget>
      </item>
@@ -225,28 +232,15 @@
      </item>
     </layout>
    </item>
-   <item row="5" column="0">
+   <item>
     <widget class="Line" name="line">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
     </widget>
    </item>
-   <item row="6" column="0">
-    <widget class="QLabel" name="image_label">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="text">
-      <string>Image</string>
-     </property>
-    </widget>
-   </item>
-   <item row="7" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_4">
      <item>
       <widget class="QLabel" name="label_6">
        <property name="font">
@@ -256,7 +250,7 @@
         </font>
        </property>
        <property name="text">
-        <string>OSC</string>
+        <string>OSC:</string>
        </property>
       </widget>
      </item>
@@ -271,38 +265,41 @@
       <widget class="QLineEdit" name="server_le"/>
      </item>
      <item>
-      <widget class="QCheckBox" name="send_centroids_cb">
+      <widget class="QCheckBox" name="send_osc_cb">
        <property name="text">
-        <string>Send centroids</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QCheckBox" name="send_grid_cb">
-       <property name="text">
-        <string>Send points</string>
+        <string>Send</string>
        </property>
       </widget>
      </item>
     </layout>
    </item>
+   <item>
+    <widget class="Line" name="line_4">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="image_label">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="text">
+      <string>Image</string>
+     </property>
+    </widget>
+   </item>
   </layout>
   <zorder>image_label</zorder>
-  <zorder>label_4</zorder>
   <zorder>line</zorder>
-  <zorder>blobs_cb</zorder>
-  <zorder>centroids_cb</zorder>
-  <zorder>horizontalSpacer_2</zorder>
-  <zorder>grid_cb</zorder>
-  <zorder>label_6</zorder>
   <zorder>line_2</zorder>
   <zorder>line_3</zorder>
-  <zorder>label_7</zorder>
-  <zorder>server_le</zorder>
-  <zorder>label</zorder>
-  <zorder>label_5</zorder>
-  <zorder>send_centroids_cb</zorder>
-  <zorder>send_grid_cb</zorder>
+  <zorder>boundaries_cb</zorder>
+  <zorder>line_4</zorder>
  </widget>
  <tabstops>
   <tabstop>image_rb</tabstop>
