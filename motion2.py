@@ -59,24 +59,25 @@ def get_kinect_coords(original_image, blob):
     blob.image = old_image
     return point
 
-def get_centroids_map(original_image, centroids):
-    grid_width = original_image.width
-    grid_height = 254 # number of depth levels returned by the kinect
-    grid = numpy.zeros((grid_height, grid_width), dtype=numpy.int8)
-    for c in centroids:
-        x, y, z = c
-        grid[z, x] = y
-    return grid
-
-def osc_msg_cb(path, tags, args, source):
-    print('path: %s' % path)
-    print('tags: %s' % tags)
-    print('args: %s' % args)
-    print('source: %s' % source)
 
 class OSCCommunicator(object):
 
     def __init__(self, server_ip, client_ip, server_port=5000, client_port=8000):
+        '''
+        Inputs:
+
+            server_ip - A string holding this machine's ip address.
+
+            client_ip - A string holding the ip address of the machine where
+                we will send OSC messages.
+
+            server_port - An integer specifying the port number that we will
+                use on this machine for the server.
+
+            client_port - An integer specifying the port number of the
+                machine that will receive our sent OSC messages.
+        '''
+
         self.server = OSC.OSCServer((server_ip, server_port))
         self.server.timeout = 0
         self.server.addMsgHandler('/1/toggle1', self._print_msg)
@@ -93,7 +94,7 @@ class OSCCommunicator(object):
         print('address: %s' % address)
         print('tags: %s' % tags)
         print('data: %s' % data)
-        print('client_address: %s' % client_address)
+        print('client_address: %s' % (client_address,))
 
 
 class Grid(object):
@@ -117,9 +118,9 @@ class Grid(object):
 
         '''
 
-        self.WIDTH = cols
-        self.HEIGHT = lines
-        self.DEPTH = depth
+        self.WIDTH = float(cols)
+        self.HEIGHT = float(lines)
+        self.DEPTH = float(depth)
         self.REAL_MIN_WIDTH = real_min_width
         self.REAL_MAX_WIDTH = real_max_width
         self.REAL_MIN_HEIGHT = real_min_height
@@ -129,7 +130,6 @@ class Grid(object):
         self.real_width_range = real_max_width - real_min_width
         self.real_height_range = real_max_height - real_min_height
         self.real_depth_range = real_max_depth - real_min_depth
-
         self.xy_grid = numpy.ones((self.HEIGHT, self.WIDTH), dtype=numpy.int8) * 255
         self.xz_grid = numpy.ones((self.DEPTH, self.WIDTH), dtype=numpy.int8) * 255
 
@@ -140,23 +140,38 @@ class Grid(object):
         '''
 
         x, y, z = point
-        norm_x = ((x - self.REAL_MIN_WIDTH) * self.WIDTH /
-                self.real_width_range) + 0
-        norm_y = ((y - self.REAL_MIN_HEIGHT) * self.HEIGHT /
-                self.real_height_range) + 0
+        norm_x = (((x - self.REAL_MIN_WIDTH) * self.WIDTH /
+                self.real_width_range) + 0) / self.WIDTH
+        norm_y = (((y - self.REAL_MIN_HEIGHT) * self.HEIGHT /
+                self.real_height_range) + 0) / self.HEIGHT
         norm_z = ((z - self.REAL_MIN_DEPTH) * self.DEPTH /
                 self.real_depth_range) + 0
+        if norm_x < 0:
+            norm_x = 0
+        elif norm_x >= self.WIDTH:
+            #norm_x = self.WIDTH - 1
+            norm_x = 1
+        if norm_y < 0:
+            norm_y = 0
+        elif norm_y >= self.HEIGHT:
+            #norm_y = self.HEIGHT - 1
+            norm_y = 1
+        norm_z = (self.DEPTH - norm_z) / self.DEPTH
+        if norm_z < 0:
+            norm_z = 0
+        elif norm_z >= self.DEPTH:
+            #norm_z = self.DEPTH - 1
+            norm_z = 1
         return [norm_x, norm_y, norm_z]
 
     def update_grid(self, *points):
         self.xy_grid.fill(255)
         self.xz_grid.fill(255)
         for p in points:
-            print('old coords: %s' % p)
+            print('old coordinates: %s' % p)
             x, y, z = self._normalize_point(p)
-            print('new coords: %s, %s, %s' % (x, y, z))
+            print('normalized coordinates: %s, %s, %s' % (x, y, z))
             self.xy_grid[y, x] = z
-            #self.xz_grid[z, x] = y
             self.xz_grid[z, x] = 0
 
     def get_image(self, grid_type='xz'):
@@ -175,7 +190,7 @@ if __name__ == '__main__':
     MIN_AREA_DEPTH = 1500
     k = scv.Kinect()
     first = k.getDepth()
-    g = Grid(cols=first.width, lines=first.height, real_min_depth=200)
+    g = Grid(cols=first.width, lines=first.height, depth=480, real_min_depth=200)
     previous = first
     disp = scv.Display((first.width*2, first.height))
     while disp.isNotDone():
@@ -192,14 +207,11 @@ if __name__ == '__main__':
                     depth_centroids.append(get_kinect_coords(d.invert(), b))
                 normalized_centroids = map(lambda i: i[2]*100/254, 
                                            depth_centroids)
-                print('centroids: %s' % depth_centroids)
-                print('normalized centroids: %s' % normalized_centroids)
                 g.update_grid(*depth_centroids)
-
                 big_blobs.image = d
                 big_blobs.draw(color=scv.Color.RED, width=3)
-        diff = (d - previous).binarize(0).invert()
-        motion_blobs = get_motion_blobs(diff)
+        #diff = (d - previous).binarize(0).invert()
+        #motion_blobs = get_motion_blobs(diff)
         #if motion_blobs is not None:
         #    bigger_blobs = motion_blobs.filter(motion_blobs.area() > 1000)
         #    if len(bigger_blobs) > 1:
@@ -210,7 +222,7 @@ if __name__ == '__main__':
         #            motion_centroids.append(get_kinect_coords(d.invert(), b))
         #        g.update_grid(*motion_centroids)
         drawn_d = d.applyLayers()
-        drawn_diff = diff.applyLayers()
+        #drawn_diff = diff.applyLayers()
         grid_im = g.get_image('xz')
         #composite = drawn_diff.sideBySide(grid_im, scale=False)
         composite = drawn_d.sideBySide(grid_im, scale=False)
