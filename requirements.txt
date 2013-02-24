@@ -1,0 +1,4 @@
+SimpleCV
+numpy
+scipy
+simpleOSC

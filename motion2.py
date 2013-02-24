@@ -12,7 +12,8 @@ from gridwarper import GridWarper
 
 def get_blobs(depth_im):
     morphed = depth_im.dilate(5)
-    bin_ = morphed.binarize(1).invert()
+    #bin_ = morphed.binarize(1).invert()
+    bin_ = morphed
     blobs = bin_.findBlobs()
     return blobs
 
@@ -43,7 +44,9 @@ def get_kinect_coords(original_image, blob):
 
 class OSCCommunicator(object):
 
-    def __init__(self, server_ip, client_ip, server_port=5000, client_port=8000):
+    def __init__(self, server_ip, client_ip, 
+                 server_port=5000, client_port=8000,
+                 send_OSC=True):
         '''
         Inputs:
 
@@ -61,9 +64,11 @@ class OSCCommunicator(object):
 
         self.server = OSC.OSCServer((server_ip, server_port))
         self.server.timeout = 0
-        self.server.addMsgHandler('/1/toggle1', self._print_msg)
+        #self.server.addMsgHandler('/1/toggle1', self._print_msg)
+        self.server.addMsgHandler('/1/toggle1', self._toggle_send_OSC)
         self.client = OSC.OSCClient()
         self.client.connect((client_ip, client_port))
+        self.send_OSC = send_OSC
 
     def send_message(self, address, *values):
         message = OSC.OSCMessage(address)
@@ -76,6 +81,9 @@ class OSCCommunicator(object):
         print('tags: %s' % tags)
         print('data: %s' % data)
         print('client_address: %s' % (client_address,))
+
+    def _toggle_send_OSC(self, address, tags, data, client_address):
+        self.send_OSC = bool(data[0])
 
 
 class Grid(object):
@@ -145,16 +153,17 @@ class Grid(object):
         self.xy_grid.fill(255)
         self.xz_grid.fill(255)
         for p in points:
-            print('old coordinates: %s' % p)
+            #print('old coordinates: %s' % p)
             the_point = self._rescale_point(p)
             if the_point is not None:
                 x, y, z = the_point
-                print('rescaled coordinates: %s, %s, %s' % (x, y, z))
+                #print('rescaled coordinates: %s, %s, %s' % (x, y, z))
                 warped_z, warped_x = self.warper.get_coords(z, x)
-                print('warped coordinates: %s, %s' % (warped_x, warped_z))
+                #print('warped coordinates: %s, %s' % (warped_x, warped_z))
                 grid_x = numpy.round(warped_x * (self.WIDTH - 1))
                 grid_z = numpy.round(warped_z * (self.DEPTH - 1))
                 self.xz_grid[grid_z, grid_x] = self.DEPTH_VALUE_POINT
+                self.xy_grid[y, grid_x] = self.DEPTH_VALUE_POINT
 
     def get_image(self, grid_type='xz'):
         if grid_type == 'xy':
@@ -168,27 +177,29 @@ class Grid(object):
     def send_coordinates(self, osc_client):
         coords_xz = numpy.argwhere(self.xz_grid == self.DEPTH_VALUE_POINT)
         coords_xy = numpy.argwhere(self.xy_grid == self.DEPTH_VALUE_POINT)
+        print('coords_xz: %s' % coords_xz)
+        print('coords_xy: %s' % coords_xy)
         num_points = coords_xz.shape[0]
-        #coords = numpy.zeros((num_points, 3))
-        coords = []
-        coords.append(num_points)
-        for pt in range(num_points):
-            #coords[pt, 0] = coords_xz[pt, 1] / self.WIDTH
-            #coords[pt, 1] = coords_xy[pt, 0] / self.HEIGHT
-            #coords[pt, 2] = coords_xz[pt, 0] / self.DEPTH
-            coords.append(coords_xz[pt, 1] / self.WIDTH)
-            coords.append(coords_xy[pt, 0] / self.HEIGHT)
-            coords.append(coords_xz[pt, 0] / self.DEPTH)
-        print('coords: %s' % coords)
-        osc_client.send_message('/topview/xyz', coords)
-        print('----------')
+        if num_points > 0:
+            #coords = numpy.zeros((num_points, 3))
+            coords = []
+            coords.append(num_points)
+            for pt in range(num_points):
+                #coords[pt, 0] = coords_xz[pt, 1] / self.WIDTH
+                #coords[pt, 1] = coords_xy[pt, 0] / self.HEIGHT
+                #coords[pt, 2] = coords_xz[pt, 0] / self.DEPTH
+                coords.append(coords_xz[pt, 1] / self.WIDTH)
+                coords.append(coords_xy[pt, 0] / self.HEIGHT)
+                coords.append(coords_xz[pt, 0] / self.DEPTH)
+            print('coords: %s' % coords)
+            #osc_client.send_message('/topview/xyz', coords)
+            print('----------')
 
 
 if __name__ == '__main__':
     osc_comm = OSCCommunicator(server_ip='192.168.1.201',
                                client_ip='192.168.1.201', 
-                               client_port=9000)
-    SEND_OSC = True
+                               client_port=9000, send_OSC=False)
     MIN_AREA_DEPTH = 1500
     k = scv.Kinect()
     first = k.getDepth()
@@ -197,9 +208,12 @@ if __name__ == '__main__':
              depth=480, real_min_depth=200)
     while disp.isNotDone():
         osc_request = osc_comm.server.handle_request()
+        if osc_comm.send_OSC:
+            print('send OSC')
         while osc_request is not None:
             osc_request = osc_comm.server.handle_request()
         d = k.getDepth()
+        d_for_draw = d.invert()
         blobs = get_blobs(d.invert())
         centroids = []
         if blobs is not None:
@@ -209,12 +223,12 @@ if __name__ == '__main__':
                     centroid = get_kinect_coords(d, b)
                     if centroid is not None:
                         centroids.append(centroid)
-                #if SEND_OSC:
-                #    g.send_coordinates(osc_comm)
-                big_blobs.image = d
+                if osc_comm.send_OSC:
+                    g.send_coordinates(osc_comm)
+                big_blobs.image = d_for_draw
                 big_blobs.draw(color=scv.Color.RED, width=3)
         g.update_grid(*centroids)
-        drawn_d = d.invert().applyLayers()
+        drawn_d = d_for_draw.applyLayers()
         grid_im = g.get_image('xz')
         composite = drawn_d.sideBySide(grid_im, scale=False)
         composite.save(disp)

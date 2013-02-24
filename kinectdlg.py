@@ -17,6 +17,7 @@ from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.prepared import prep
 import OSC
 import ui_kinectdlg
+from multiplekinects import Kinect
 
 class OSCSender(object):
 
@@ -34,7 +35,8 @@ class OSCSender(object):
 class Detector(object):
 
     def __init__(self, grid_spacing=40):
-        self.detector = scv.Kinect()
+        #self.detector = scv.Kinect()
+        self.detector = Kinect(1)
         im, dep = self.capture()
         self.grid = []
         for x in range(0, im.width+1, grid_spacing):
