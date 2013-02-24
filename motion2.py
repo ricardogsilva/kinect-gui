@@ -8,14 +8,12 @@ import SimpleCV as scv
 import numpy
 import scipy.ndimage as ndimage
 import OSC
+from gridwarper import GridWarper
 
-def get_depth_blobs(depth_im):
+def get_blobs(depth_im):
     morphed = depth_im.dilate(5)
-    blobs = morphed.findBlobs()
-    return blobs
-
-def get_motion_blobs(motion_im):
-    blobs = motion_im.findBlobs()
+    bin_ = morphed.binarize(1).invert()
+    blobs = bin_.findBlobs()
     return blobs
 
 def count_pixels(im):
@@ -26,23 +24,6 @@ def count_pixels(im):
     counts.sort(key=lambda item:item[1], reverse=True)
     return counts
 
-def simplify_image(image, intensity_levels=20):
-    filtered = image.smooth(aperture=(21, 21))
-    #im = image.getNumpy()[:,:,0]
-    im = filtered.getNumpy()[:,:,0]
-    #filtered = ndimage.gaussian_filter(im, 0.1)
-    counts = count_pixels(im)
-    top = [c[0] for c in counts[:20]]
-    try:
-        top.remove(255)
-    except ValueError:
-        pass
-    top.sort()
-    simpler = numpy.zeros(im.shape)
-    for i in top:
-        simpler += (im == i) * i
-    return simpler
-
 def get_kinect_coords(original_image, blob):
     point = None
     x, y = blob.centroid()
@@ -50,11 +31,11 @@ def get_kinect_coords(original_image, blob):
     blob.image = original_image
     cropped = blob.crop()
     np_im = cropped.getNumpy()
-    im_values = set(np_im.flat)
-    im_values.discard(255) # not a real sensor measurement
-    intensity_values = list(im_values)
-    if len(intensity_values) > 0:
-        average_intensity = int(numpy.average(intensity_values))
+    counts = count_pixels(np_im)
+    useful_counts = numpy.asarray([c for c in counts if c[0]!=255 and c[1]>0])
+    if len(useful_counts) > 0:
+        average_intensity = numpy.average(useful_counts[:, 0],
+                                          weights=useful_counts[:, 1])
         point = [int(x), int(y), average_intensity]
     blob.image = old_image
     return point
@@ -118,6 +99,7 @@ class Grid(object):
 
         '''
 
+        self.DEPTH_VALUE_POINT = 0
         self.WIDTH = float(cols)
         self.HEIGHT = float(lines)
         self.DEPTH = float(depth)
@@ -132,47 +114,47 @@ class Grid(object):
         self.real_depth_range = real_max_depth - real_min_depth
         self.xy_grid = numpy.ones((self.HEIGHT, self.WIDTH), dtype=numpy.int8) * 255
         self.xz_grid = numpy.ones((self.DEPTH, self.WIDTH), dtype=numpy.int8) * 255
+        self.warper = GridWarper(width=self.WIDTH, height=self.DEPTH)
 
-    def _normalize_point(self, point):
+    def _rescale_point(self, point):
         '''
-        Return a new point (a 3 element list) with normalized depth,
+        Return a new point (a 3 element list) with rescaled depth,
         according to the grid's depth.
         '''
 
         x, y, z = point
-        norm_x = (((x - self.REAL_MIN_WIDTH) * self.WIDTH /
-                self.real_width_range) + 0) / self.WIDTH
-        norm_y = (((y - self.REAL_MIN_HEIGHT) * self.HEIGHT /
-                self.real_height_range) + 0) / self.HEIGHT
-        norm_z = ((z - self.REAL_MIN_DEPTH) * self.DEPTH /
-                self.real_depth_range) + 0
-        if norm_x < 0:
-            norm_x = 0
-        elif norm_x >= self.WIDTH:
-            #norm_x = self.WIDTH - 1
-            norm_x = 1
-        if norm_y < 0:
-            norm_y = 0
-        elif norm_y >= self.HEIGHT:
-            #norm_y = self.HEIGHT - 1
-            norm_y = 1
-        norm_z = (self.DEPTH - norm_z) / self.DEPTH
-        if norm_z < 0:
-            norm_z = 0
-        elif norm_z >= self.DEPTH:
-            #norm_z = self.DEPTH - 1
-            norm_z = 1
-        return [norm_x, norm_y, norm_z]
+        r_x = ((x - self.REAL_MIN_WIDTH) * self.WIDTH /
+                self.real_width_range)
+        r_y = ((y - self.REAL_MIN_HEIGHT) * self.HEIGHT /
+                self.real_height_range)
+        r_z = ((z - self.REAL_MIN_DEPTH) * self.DEPTH /
+                self.real_depth_range)
+        if r_x <= 0 or r_x >= self.WIDTH:
+            r_x = None
+        if r_y <= 0 or r_x >= self.HEIGHT:
+            r_y = None
+        if r_z <= 0 or r_z >= self.DEPTH:
+            r_z = None
+        if r_x is None or r_y is None or r_z is None:
+            result = None
+        else:
+            result = [r_x, r_y, r_z]
+        return result
 
     def update_grid(self, *points):
         self.xy_grid.fill(255)
         self.xz_grid.fill(255)
         for p in points:
             print('old coordinates: %s' % p)
-            x, y, z = self._normalize_point(p)
-            print('normalized coordinates: %s, %s, %s' % (x, y, z))
-            self.xy_grid[y, x] = z
-            self.xz_grid[z, x] = 0
+            the_point = self._rescale_point(p)
+            if the_point is not None:
+                x, y, z = the_point
+                print('rescaled coordinates: %s, %s, %s' % (x, y, z))
+                warped_z, warped_x = self.warper.get_coords(z, x)
+                print('warped coordinates: %s, %s' % (warped_x, warped_z))
+                grid_x = numpy.round(warped_x * (self.WIDTH - 1))
+                grid_z = numpy.round(warped_z * (self.DEPTH - 1))
+                self.xz_grid[grid_z, grid_x] = self.DEPTH_VALUE_POINT
 
     def get_image(self, grid_type='xz'):
         if grid_type == 'xy':
@@ -180,51 +162,59 @@ class Grid(object):
         elif grid_type == 'xz':
             grid = self.xz_grid
         grid_im = scv.Image(grid.transpose())
-        #morphed = grid_im.dilate(5)
         morphed = grid_im.erode(5)
         return morphed
 
+    def send_coordinates(self, osc_client):
+        coords_xz = numpy.argwhere(self.xz_grid == self.DEPTH_VALUE_POINT)
+        coords_xy = numpy.argwhere(self.xy_grid == self.DEPTH_VALUE_POINT)
+        num_points = coords_xz.shape[0]
+        #coords = numpy.zeros((num_points, 3))
+        coords = []
+        coords.append(num_points)
+        for pt in range(num_points):
+            #coords[pt, 0] = coords_xz[pt, 1] / self.WIDTH
+            #coords[pt, 1] = coords_xy[pt, 0] / self.HEIGHT
+            #coords[pt, 2] = coords_xz[pt, 0] / self.DEPTH
+            coords.append(coords_xz[pt, 1] / self.WIDTH)
+            coords.append(coords_xy[pt, 0] / self.HEIGHT)
+            coords.append(coords_xz[pt, 0] / self.DEPTH)
+        print('coords: %s' % coords)
+        osc_client.send_message('/topview/xyz', coords)
+        print('----------')
+
 
 if __name__ == '__main__':
-    osc_comm = OSCCommunicator(server_ip='192.168.1.201', client_ip='127.0.1.1')
+    osc_comm = OSCCommunicator(server_ip='192.168.1.201',
+                               client_ip='192.168.1.201', 
+                               client_port=9000)
+    SEND_OSC = True
     MIN_AREA_DEPTH = 1500
     k = scv.Kinect()
     first = k.getDepth()
-    g = Grid(cols=first.width, lines=first.height, depth=480, real_min_depth=200)
-    previous = first
     disp = scv.Display((first.width*2, first.height))
+    g = Grid(cols=first.width, lines=first.height, 
+             depth=480, real_min_depth=200)
     while disp.isNotDone():
         osc_request = osc_comm.server.handle_request()
         while osc_request is not None:
             osc_request = osc_comm.server.handle_request()
-        d = k.getDepth().invert()
-        d_blobs = get_depth_blobs(d)
-        if d_blobs is not None:
-            big_blobs = d_blobs.filter(d_blobs.area() > MIN_AREA_DEPTH)
+        d = k.getDepth()
+        blobs = get_blobs(d.invert())
+        centroids = []
+        if blobs is not None:
+            big_blobs = blobs.filter(blobs.area() > MIN_AREA_DEPTH)
             if len(big_blobs) > 0:
-                depth_centroids = []
                 for b in big_blobs:
-                    depth_centroids.append(get_kinect_coords(d.invert(), b))
-                normalized_centroids = map(lambda i: i[2]*100/254, 
-                                           depth_centroids)
-                g.update_grid(*depth_centroids)
+                    centroid = get_kinect_coords(d, b)
+                    if centroid is not None:
+                        centroids.append(centroid)
+                #if SEND_OSC:
+                #    g.send_coordinates(osc_comm)
                 big_blobs.image = d
                 big_blobs.draw(color=scv.Color.RED, width=3)
-        #diff = (d - previous).binarize(0).invert()
-        #motion_blobs = get_motion_blobs(diff)
-        #if motion_blobs is not None:
-        #    bigger_blobs = motion_blobs.filter(motion_blobs.area() > 1000)
-        #    if len(bigger_blobs) > 1:
-        #        motion_centroids = []
-        #        bigger_blobs.image = diff
-        #        for b in bigger_blobs[-2:]:
-        #            b.draw(color=scv.Color.RED, width=-1, alpha=170)
-        #            motion_centroids.append(get_kinect_coords(d.invert(), b))
-        #        g.update_grid(*motion_centroids)
-        drawn_d = d.applyLayers()
-        #drawn_diff = diff.applyLayers()
+        g.update_grid(*centroids)
+        drawn_d = d.invert().applyLayers()
         grid_im = g.get_image('xz')
-        #composite = drawn_diff.sideBySide(grid_im, scale=False)
         composite = drawn_d.sideBySide(grid_im, scale=False)
         composite.save(disp)
-        previous = d
