@@ -9,132 +9,14 @@ detection.
 import sys
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
-import SimpleCV as scv
-import pygame
-import numpy
 import qimage2ndarray
 from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.prepared import prep
-import OSC
-import ui_kinectdlg
+import ui_detector
+import detection
 from multiplekinects import Kinect
 
-class OSCSender(object):
-
-    def __init__(self, host='127.0.1.1', port=8000):
-        self.client = OSC.OSCClient()
-        self.client.connect((host, port))
-
-    def send_message(self, address, *values):
-        message = OSC.OSCMessage(address)
-        for v in values:
-            message.append(v)
-        self.client.send(message)
-
-
-class Detector(object):
-
-    def __init__(self, grid_spacing=40):
-        #self.detector = scv.Kinect()
-        self.detector = Kinect(1)
-        im, dep = self.capture()
-        self.grid = []
-        for x in range(0, im.width+1, grid_spacing):
-            for y in range(0, im.height+1, grid_spacing):
-                self.grid.append(Point(x, y))
-
-    def capture(self, image_type='image'):
-        the_image = None
-        the_depth = None
-        if image_type == 'image':
-            the_image = self.detector.getImage()
-        elif image_type == 'depth':
-            the_depth = self.detector.getDepth()
-        elif image_type == 'both':
-            the_image = self.detector.getImage()
-            the_depth = self.detector.getDepth()
-        return the_image, the_depth
-
-    def _pre_process(self, depth, lower_threshold,
-                    upper_threshold):
-        one_channel = depth.getNumpyCv2()[:,:,0]
-        filtered_lower = (one_channel > lower_threshold) * one_channel
-        filtered_higher = (filtered_lower < upper_threshold) * filtered_lower 
-        the_depth = scv.Image(filtered_higher.transpose())
-        morphology_steps = 10
-        dilated = the_depth.dilate(morphology_steps)
-        eroded = dilated.erode(morphology_steps)
-        return eroded
-
-    def _get_qimage_from_blobs(self, blobs, detected_image):
-        blobs.image = detected_image
-        blobs.draw(color=scv.Color.RED, width=3)
-        dl = detected_image.getDrawingLayer()
-        surf = dl.renderToSurface(pygame.Surface((detected_image. width,
-                                    detected_image.height)))
-        arr = pygame.surfarray.array2d(surf).transpose()
-        masked_array = numpy.ma.masked_equal(arr, 0)
-        return qimage2ndarray.array2qimage(masked_array)
-
-    def process_depth_detection(self, depth, 
-                                lower_threshold=0, 
-                                upper_threshold=255, 
-                                get_centroids=True,
-                                get_grid_points=True,
-                                get_boundaries=True):
-        centroids = None
-        grid_points = None
-        boundaries = None
-        blobs_qim = None
-        detected = self._pre_process(depth, lower_threshold, upper_threshold)
-        blobs = detected.findBlobs()
-        if blobs is not None:
-            if get_centroids:
-                centroids = self._get_centroids(blobs)
-            if get_grid_points:
-                grid_points = self._get_grid_points(blobs)
-            if get_boundaries:
-                boundaries = self._get_boundary_points(blobs)
-                if len(boundaries) == 0:
-                    boundaries = None
-            blobs_qim = self._get_qimage_from_blobs(blobs, detected)
-        return (detected, blobs_qim, centroids, grid_points, boundaries)
-
-    def _get_centroids(self, blobs):
-        return [b.centroid() for b in blobs]
-
-    def _get_grid_points(self, blobs):
-        polygons = MultiPolygon([Polygon(b.contour()) for b in blobs])
-        prepared = prep(polygons)
-        grid_points = filter(prepared.contains, self.grid)
-        return grid_points
-
-    def _get_boundary_points(self, blobs):
-        '''
-        Inputs:
-            blobs - a SimpleCV.Features.Features.FeatureSet
-
-        Returns a list of lists with shapely.Point points that are on
-        a simplified boundary for each blob.
-        '''
-
-        boundaries = []
-        for b in blobs:
-            pol = Polygon(b.contour())
-            simpler = pol.simplify(tolerance=0.5, preserve_topology=False)
-            if simpler.type == 'Polygon' and simpler.exterior is not None:
-                blob_boundary = []
-                points = list(simpler.exterior.coords)
-                for pt in list(simpler.exterior.coords):
-                    blob_boundary.append(Point(pt[0], pt[1]))
-                boundaries.append(blob_boundary)
-        return boundaries
-
-    def process_image_detection(self, image):
-        return image
-
-
-class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
+class DetectorDlg(QDialog, ui_detector.Ui_DetectorDialog):
 
     def __init__(self, parent=None, detector=None):
         super(KinectDlg, self).__init__(parent)
@@ -295,11 +177,23 @@ class KinectDlg(QDialog, ui_kinectdlg.Ui_KinectDialog):
             address = '/'.join((base_address, index, 'xy'))
             self.osc_client.send_message(address, c[0], c[1])
 
+def detect_kinects():
+    dev_number = 0
+    kinects = []
+    found = True
+    while found:
+        try:
+            k = Kinect(dev_number)
+            kinects.append(k)
+            dev_number += 1
+        except:
+            found = False
+    return kinects
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     try:
-        d = Detector()
+        d = detection.Detector()
     except (TypeError,):
         box = QMessageBox()
         box.setText('Kinect not detected')
