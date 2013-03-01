@@ -92,6 +92,7 @@ class Detector(object):
         diff = self.segmentation_model_depth.getSegmentedImage(whiteFG=False)
         detected = self._single_image_detection(image=diff,
                                                 blobs_area_filter=1500,
+                                                blobs_invert_image=False,
                                                 get_centroids=centroids,
                                                 get_boundaries=boundaries)
         blob_image, blobs, centroids, boundaries = detected
@@ -105,6 +106,7 @@ class Detector(object):
         diff = self.segmentation_model_image.getSegmentedImage(whiteFG=False)
         detected = self._single_image_detection(image=diff,
                                                 blobs_area_filter=1500,
+                                                blobs_invert_image=False,
                                                 get_centroids=centroids,
                                                 get_boundaries=boundaries)
         blob_image, blobs, centroids, boundaries = detected
@@ -115,8 +117,10 @@ class Detector(object):
         self.detected['boundaries'] = boundaries
 
     def _single_image_detection(self, image, blobs_area_filter=1500,
-                                get_centroids=True, get_boundaries=False):
-        blobs, blob_image = self._get_blobs(image, min_area=blobs_area_filter)
+                                blobs_invert_image=True, get_centroids=True,
+                                get_boundaries=False):
+        blobs, blob_image = self._get_blobs(image, min_area=blobs_area_filter,
+                                            invert_image=blobs_invert_image)
         centroids = None
         boundaries = None
         if blobs is not None:
@@ -131,9 +135,12 @@ class Detector(object):
     def _detect_combined(self):
         pass
 
-    def _get_blobs(self, image, min_area=0):
-        inv = image.invert()
-        morphed = inv.dilate(5)
+    def _get_blobs(self, image, min_area=0, invert_image=True):
+        if invert_image:
+            im = image.invert()
+        else:
+            im = image
+        morphed = im.dilate(5)
         blobs = morphed.findBlobs()
         big_blobs = None
         if blobs is not None:
@@ -262,7 +269,6 @@ class Detector(object):
         results.update({'centroids_grid' : self.centroids_grid,
                         'boundaries_grid' : self.boundaries_grid})
         return results
-
 
 if __name__ == '__main__':
     d = Detector()

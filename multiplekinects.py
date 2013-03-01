@@ -24,13 +24,21 @@ except AttributeError:
 
 class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
 
+    DETECTION_METHODS = {
+        'depth' : ['depth', 'blob_source'],
+        'image' : ['image', 'blob_source'],
+        'motion_depth' : ['depth', 'motion_depth', 'blob_source'],
+        'motion_image' :['image', 'motion_image', 'blob_source'],
+    }
+
     def __init__(self, kinects, parent=None):
         super(MultipleKinectsDlg, self).__init__(parent)
         self.setupUi(self)
+        self.painter = QPainter()
         self.kinects = dict()
-        DETECTION_METHODS = ['depth', 'image', 'motion depth','motion image']
-        BASE_IMAGES = ['depth', 'image', 'blob_source', 'motion_depth',
-                       'motion_image']
+        #DETECTION_METHODS = ['depth', 'image', 'motion depth','motion image']
+        #BASE_IMAGES = ['depth', 'image', 'blob_source', 'motion_depth',
+        #               'motion_image']
         tab_idx = self.kinects_tw.currentIndex()
         first_page = self.kinects_tw.widget(tab_idx)
         self.tabs = [first_page]
@@ -38,8 +46,9 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
             self.kinects[index] = {
                 'detector' : k,
                 'status' : False, 
-                'detection_method' : DETECTION_METHODS[0],
+                'detection_method' : None,
                 'base_image' : None,
+                'overlay_blobs' : False,
                 'overlay_centroids' : False,
                 'overlay_boundaries' : False,
             }
@@ -57,6 +66,8 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                                                              QRegExp('detection_method_cb_b.*'))[0],
                     'base_image_cb_b' : t.findChildren(QComboBox,
                                                        QRegExp('base_image_cb_b.*'))[0],
+                    'overlay_blobs_cb' : t.findChildren(QCheckBox,
+                                                        QRegExp('blobs_cb.*'))[0],
                     'overlay_centroids_cb' : t.findChildren(QCheckBox,
                                                             QRegExp('centroids_cb.*'))[0],
                     'overlay_boundaries_cb' : t.findChildren(QCheckBox,
@@ -70,6 +81,7 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                     'OSC_settings_b' : self.osc_settings_b,
                     'detection_method_cb_b' : self.detection_method_cb_b,
                     'base_image_cb_b' : self.base_image_cb_b,
+                    'overlay_blobs_cb' : self.blobs_cb,
                     'overlay_centroids_cb' : self.centroids_cb,
                     'overlay_boundaries_cb' : self.boundaries_cb,
                     'base_image_lab' : self.base_image_lab,
@@ -78,8 +90,6 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                                    'Kinect %i' % self.kinects[0]['detector'].device_number)
 
         for key, value in self.kinects.iteritems():
-            value['widgets']['detection_method_cb_b'].insertItems(0, DETECTION_METHODS)
-            value['widgets']['base_image_cb_b'].insertItems(0, BASE_IMAGES)
             self.connect(value['widgets']['enable_kinect_cb'], SIGNAL('toggled(bool)'),
                         self.toggle_enable_kinect)
             self.connect(value['widgets']['detection_method_cb_b'],
@@ -88,13 +98,15 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
             self.connect(value['widgets']['base_image_cb_b'],
                          SIGNAL('currentIndexChanged(const QString&)'),
                          self.toggle_base_image)
+            self.connect(value['widgets']['overlay_blobs_cb'], SIGNAL('toggled(bool)'),
+                        self.toggle_overlay_blobs)
             self.connect(value['widgets']['overlay_centroids_cb'], SIGNAL('toggled(bool)'),
                         self.toggle_overlay_centroids)
             self.connect(value['widgets']['overlay_boundaries_cb'], SIGNAL('toggled(bool)'),
                         self.toggle_overlay_boundaries)
+            value['widgets']['detection_method_cb_b'].insertItems(0, sorted(self.DETECTION_METHODS.keys()))
 
         self.kinects[0]['widgets']['enable_kinect_cb'].setChecked(True)
-
         self.startTimer(35)
 
     def toggle_enable_kinect(self, toggled):
@@ -103,14 +115,23 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         settings['status'] = settings['widgets']['enable_kinect_cb'].isChecked()
 
     def toggle_detection_method(self, detection_method):
+        detection_method = str(detection_method)
+        base_images = self.DETECTION_METHODS[detection_method]
         index = self.kinects_tw.currentIndex()
         settings = self.kinects.get(index)
         settings['detection_method'] = detection_method
+        settings['widgets']['base_image_cb_b'].clear()
+        settings['widgets']['base_image_cb_b'].insertItems(0, base_images)
 
     def toggle_base_image(self, base_image):
         index = self.kinects_tw.currentIndex()
         settings = self.kinects.get(index)
         settings['base_image'] = base_image
+
+    def toggle_overlay_blobs(self, toggled):
+        index = self.kinects_tw.currentIndex()
+        settings = self.kinects.get(index)
+        settings['overlay_blobs'] = settings['widgets']['overlay_blobs_cb'].isChecked()
 
     def toggle_overlay_centroids(self, toggled):
         index = self.kinects_tw.currentIndex()
@@ -123,35 +144,69 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         settings['overlay_boundaries'] = settings['widgets']['overlay_boundaries_cb'].isChecked()
 
     def timerEvent(self, event):
+        current_page = self.kinects_tw.currentIndex()
         for index, values in self.kinects.iteritems():
             if values['status']:
                 kinect = values['detector']
-                kinect.capture(image=True)
-                if values['detection_method'] == 'depth':
-                    pass
-                elif values['detection_method'] == 'image':
-                    kinect.detect(mode='image')
-                kinect.detect(mode='image', 
+                #kinect.capture(image=True, depth=True)
+                kinect.capture(image=True) # just for testing
+                kinect.detect(mode=values['detection_method'], 
                               centroids=values['overlay_centroids'],
                               boundaries=values['overlay_boundaries'])
                 results = kinect.get_results()
-                self.update_display(values, results)
+                if index == current_page:
+                    self.update_display(values, results)
 
-    def update_display(self, kinect_settings, results):
-        to_display = None
-        if kinect_settings['base_image'] == 'image':
-            to_display = results['image']
-        elif kinect_settings['base_image'] == 'blob_source':
-            to_display = results['blob_source']
+    def update_display(self, settings, results):
+        to_display = results[str(settings['base_image'])]
+        the_label = settings['widgets']['base_image_lab']
         if to_display is not None:
-            qim = QImage(to_display.toString(), to_display.width,
-                         to_display.height, 3*to_display.width,
-                         QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qim)
-            kinect_settings['widgets']['base_image_lab'].setPixmap(pixmap)
+            pixmap = self._update_base_image(to_display)
+            if settings['overlay_blobs'] and results['blobs'] is not None:
+                self._draw_blobs(results['blobs'], pixmap)
+            if settings['overlay_centroids']:
+                self._draw_centroids(results['centroids'], pixmap)
+            if settings['overlay_boundaries']:
+                self._draw_boundaries(results['boundaries'], pixmap)
+            the_label.setPixmap(pixmap)
 
+    def _update_base_image(self, image):
+        qim = QImage(image.toString(), image.width, image.height, 
+                     3*image.width, QImage.Format_RGB888)
+        return QPixmap.fromImage(qim)
 
+    def _draw_blobs(self, blobs, pixmap, color=QColor(255, 0, 0, 100)):
+        brush = QBrush(color)
+        self.painter.begin(pixmap)
+        self.painter.setPen(color)
+        self.painter.setBrush(brush)
+        for b in blobs:
+            pol = QPolygon([QPoint(pt[0], pt[1]) for pt in b.contour()])
+            self.painter.drawPolygon(pol)
+        self.painter.end()
 
+    def _draw_centroids(self, centroids, pixmap,
+                        color=QColor(0, 255, 0, 100),
+                        size=5):
+        brush = QBrush(color)
+        self.painter.begin(pixmap)
+        self.painter.setPen(color)
+        self.painter.setBrush(brush)
+        for c in centroids:
+            self.painter.drawEllipse(QPoint(c[0], c[1]), size, size)
+        self.painter.end()
+
+    def _draw_boundaries(self, boundaries, pixmap,
+                         color=QColor(0, 0, 255, 100),
+                         size=3):
+        brush = QBrush(color)
+        self.painter.begin(pixmap)
+        self.painter.setPen(color)
+        self.painter.setBrush(brush)
+        for b in boundaries:
+            for pt in b:
+                self.painter.drawEllipse(QPoint(pt[0], pt[1]), size, size)
+        self.painter.end()
 
     def add_tab(self, name, index):
         t = QWidget()
@@ -196,6 +251,9 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         label_3 = QLabel(t)
         label_3.setObjectName(_fromUtf8("label_3_%s" % index))
         horizontalLayout_2.addWidget(label_3)
+        blobs_cb = QCheckBox(self.tab)
+        blobs_cb.setObjectName(_fromUtf8("blobs_cb_%s" % index))
+        horizontalLayout_2.addWidget(blobs_cb)
         centroids_cb = QCheckBox(t)
         centroids_cb.setObjectName(_fromUtf8("centroids_cb_%s" % index))
         horizontalLayout_2.addWidget(centroids_cb)
@@ -205,7 +263,6 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         spacerItem2 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         horizontalLayout_2.addItem(spacerItem2)
         gridLayout.addLayout(horizontalLayout_2, 2, 0, 1, 1)
-
         base_image_lab = QLabel(self.tab)
         sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(0)
@@ -222,6 +279,7 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         label.setText(QApplication.translate("MultipleKinectsDialog", "Detection method", None, QApplication.UnicodeUTF8))
         label_2.setText(QApplication.translate("MultipleKinectsDialog", "Base image", None, QApplication.UnicodeUTF8))
         label_3.setText(QApplication.translate("MultipleKinectsDialog", "Overlay", None, QApplication.UnicodeUTF8))
+        blobs_cb.setText(QApplication.translate("MultipleKinectsDialog", "Raw blobs", None, QApplication.UnicodeUTF8))
         centroids_cb.setText(QApplication.translate("MultipleKinectsDialog", "Centroids", None, QApplication.UnicodeUTF8))
         boundaries_cb.setText(QApplication.translate("MultipleKinectsDialog", "Boundaries", None, QApplication.UnicodeUTF8))
         return t
