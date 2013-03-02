@@ -14,12 +14,19 @@ import qimage2ndarray
 from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.prepared import prep
 import ui_multiplekinects
+import ui_oscsettings
 import detection
 
 try:
     _fromUtf8 = QString.fromUtf8
 except AttributeError:
     _fromUtf8 = lambda s: s
+
+class OSCSettingsDlg(QDialog, ui_oscsettings.Ui_OSCSettingsDialog):
+
+    def __init__(self, parent=None):
+        super(OSCSettingsDlg, self).__init__(parent)
+        self.setupUi(self)
 
 
 class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
@@ -35,30 +42,18 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         super(MultipleKinectsDlg, self).__init__(parent)
         self.setupUi(self)
         self.painter = QPainter()
-        self.kinects = dict()
-        #DETECTION_METHODS = ['depth', 'image', 'motion depth','motion image']
-        #BASE_IMAGES = ['depth', 'image', 'blob_source', 'motion_depth',
-        #               'motion_image']
+        self.kinects = self.load_settings(kinects)
         tab_idx = self.kinects_tw.currentIndex()
         first_page = self.kinects_tw.widget(tab_idx)
         self.tabs = [first_page]
         for index, k in enumerate(kinects):
-            self.kinects[index] = {
-                'detector' : k,
-                'status' : False, 
-                'detection_method' : None,
-                'base_image' : None,
-                'overlay_blobs' : False,
-                'overlay_centroids' : False,
-                'overlay_boundaries' : False,
-            }
             if index  != 0:
                 t = self.add_tab('Kinect %i' % k.device_number, index)
                 self.tabs.append(t)
                 self.kinects[index]['widgets'] = {
                     'enable_kinect_cb' : t.findChildren(QCheckBox, 
                                                         QRegExp('enable_kinect_cb.*'))[0],
-                    'send_OSC_cb' : t.findChildren(QCheckBox,
+                    'send_osc_cb' : t.findChildren(QCheckBox,
                                                     QRegExp('send_osc_cb.*'))[0],
                     'OSC_settings_b' : t.findChildren(QPushButton,
                                                       QRegExp('osc_settings_b.*'))[0],
@@ -77,7 +72,7 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
             else:
                 self.kinects[index]['widgets'] = {
                     'enable_kinect_cb' : self.enable_kinect_cb,
-                    'send_OSC_cb' : self.send_osc_cb,
+                    'send_osc_cb' : self.send_osc_cb,
                     'OSC_settings_b' : self.osc_settings_b,
                     'detection_method_cb_b' : self.detection_method_cb_b,
                     'base_image_cb_b' : self.base_image_cb_b,
@@ -92,6 +87,8 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         for key, value in self.kinects.iteritems():
             self.connect(value['widgets']['enable_kinect_cb'], SIGNAL('toggled(bool)'),
                         self.toggle_enable_kinect)
+            self.connect(value['widgets']['send_osc_cb'], SIGNAL('toggled(bool)'),
+                        self.toggle_send_osc)
             self.connect(value['widgets']['detection_method_cb_b'],
                          SIGNAL('currentIndexChanged(const QString&)'),
                          self.toggle_detection_method)
@@ -104,43 +101,107 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                         self.toggle_overlay_centroids)
             self.connect(value['widgets']['overlay_boundaries_cb'], SIGNAL('toggled(bool)'),
                         self.toggle_overlay_boundaries)
+            self.connect(value['widgets']['OSC_settings_b'], SIGNAL('clicked()'),
+                        self.set_osc_settings)
             value['widgets']['detection_method_cb_b'].insertItems(0, sorted(self.DETECTION_METHODS.keys()))
+        self.restore_gui()
 
-        self.kinects[0]['widgets']['enable_kinect_cb'].setChecked(True)
+        #self.kinects[0]['widgets']['enable_kinect_cb'].setChecked(True)
         self.startTimer(35)
 
+    def load_settings(self, kinects):
+        the_settings = dict()
+        s = QSettings()
+        for i, kinect in enumerate(kinects):
+            the_settings[i] = {
+                'detector' : kinect,
+                'status' : s.value('kinect%i/status' % i, QVariant(False)).toBool(),
+                'send_osc' : s.value('kinect%i/send_osc' % i, QVariant(False)).toBool(),
+                'detection_method' : s.value('kinect%i/detection_method' % i, QVariant(None)).toString(),
+                'base_image' : s.value('kinect%i/base_image' % i, QVariant(None)).toString(),
+                'overlay_blobs' : s.value('kinect%i/overlay_blobs' % i, QVariant(False)).toBool(),
+                'overlay_centroids' : s.value('kinect%i/overlay_centroids' % i, QVariant(False)).toBool(),
+                'overlay_boundaries' : s.value('kinect%i/overlay_boundaries' % i, QVariant(False)).toBool(),
+                'osc_server_ip' : s.value('kinect%i/osc_server_ip' % i, QVariant(None)).toString(),
+                'osc_server_port' : s.value('kinect%i/osc_server_port' % i, QVariant(None)).toString(),
+            }
+        return the_settings
+
+    def restore_gui(self):
+        for index, ks in self.kinects.iteritems():
+            gui = ks['widgets']
+            gui['enable_kinect_cb'].setChecked(ks['status'])
+            gui['send_osc_cb'].setChecked(ks['send_osc'])
+            gui['overlay_blobs_cb'].setChecked(ks['overlay_blobs'])
+            gui['overlay_centroids_cb'].setChecked(ks['overlay_centroids'])
+            gui['overlay_boundaries_cb'].setChecked(ks['overlay_boundaries'])
+
+    def closeEvent(self, event):
+        settings = QSettings()
+        for index, ks in self.kinects.iteritems():
+            settings.setValue('kinect%i/status' % index, QVariant(ks['status']))
+            settings.setValue('kinect%i/send_osc' % index, QVariant(ks['send_osc']))
+            settings.setValue('kinect%i/detection_method' % index,
+                              QVariant(ks['detection_method']))
+            settings.setValue('kinect%i/base_image' % index,
+                              QVariant(ks['base_image']))
+            settings.setValue('kinect%i/overlay_blobs' % index,
+                              QVariant(ks['overlay_blobs']))
+            settings.setValue('kinect%i/overlay_centroids' % index,
+                              QVariant(ks['overlay_centroids']))
+            settings.setValue('kinect%i/overlay_boundaries' % index,
+                              QVariant(ks['overlay_boundaries']))
+            settings.setValue('kinect%i/osc_server_ip' % index,
+                              QVariant(ks['osc_server_ip']))
+            settings.setValue('kinect%i/base_image' % index,
+                              QVariant(ks['osc_server_port']))
+
+    def set_osc_settings(self):
+        index, settings = self._get_index_settings()
+        dialog = OSCSettingsDlg(self)
+        dialog.osc_server_ip_le.setText(settings['osc_server_ip'].toString())
+        dialog.osc_server_port_le.setText(settings['osc_server_port'].toString())
+        if dialog.exec_():
+            settings['osc_server_ip'] = QVariant(dialog.osc_server_ip_le.text())
+            settings['osc_server_port'] = QVariant(dialog.osc_server_port_le.text())
+        print('Aqui, e o indice: %i' % index)
+
     def toggle_enable_kinect(self, toggled):
+        index, settings = self._get_index_settings()
+        settings['status'] = settings['widgets']['enable_kinect_cb'].isChecked()
+
+    def toggle_send_osc(self, toggled):
+        index, settings = self._get_index_settings()
+        settings['send_osc'] = settings['widgets']['send_osc_cb'].isChecked()
+        print('settings[send_osc]: %s' % settings['send_osc'])
+
+    def _get_index_settings(self):
         index = self.kinects_tw.currentIndex()
         settings = self.kinects.get(index)
-        settings['status'] = settings['widgets']['enable_kinect_cb'].isChecked()
+        return index, settings
 
     def toggle_detection_method(self, detection_method):
         detection_method = str(detection_method)
         base_images = self.DETECTION_METHODS[detection_method]
-        index = self.kinects_tw.currentIndex()
-        settings = self.kinects.get(index)
+        index, settings = self._get_index_settings()
         settings['detection_method'] = detection_method
         settings['widgets']['base_image_cb_b'].clear()
         settings['widgets']['base_image_cb_b'].insertItems(0, base_images)
 
     def toggle_base_image(self, base_image):
-        index = self.kinects_tw.currentIndex()
-        settings = self.kinects.get(index)
+        index, settings = self._get_index_settings()
         settings['base_image'] = base_image
 
     def toggle_overlay_blobs(self, toggled):
-        index = self.kinects_tw.currentIndex()
-        settings = self.kinects.get(index)
+        index, settings = self._get_index_settings()
         settings['overlay_blobs'] = settings['widgets']['overlay_blobs_cb'].isChecked()
 
     def toggle_overlay_centroids(self, toggled):
-        index = self.kinects_tw.currentIndex()
-        settings = self.kinects.get(index)
+        index, settings = self._get_index_settings()
         settings['overlay_centroids'] = settings['widgets']['overlay_centroids_cb'].isChecked()
 
     def toggle_overlay_boundaries(self, toggled):
-        index = self.kinects_tw.currentIndex()
-        settings = self.kinects.get(index)
+        index, settings = self._get_index_settings()
         settings['overlay_boundaries'] = settings['widgets']['overlay_boundaries_cb'].isChecked()
 
     def timerEvent(self, event):
@@ -313,6 +374,9 @@ def test_data():
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setOrganizationName('rixilva')
+    app.setOrganizationDomain('rixilva.pt')
+    app.setApplicationName('Kinect Detection')
     #kinects = detect_kinects()
     kinects = test_data() # just for testing
     if len(kinects) == 0:
