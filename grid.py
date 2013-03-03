@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+import SimpleCV as scv
 
 class GridWarper(object):
 
@@ -99,10 +100,12 @@ class Grid(object):
                 self.real_depth_range)
         if r_x <= 0 or r_x >= self.WIDTH:
             r_x = None
-        if r_y <= 0 or r_x >= self.HEIGHT:
+        if r_y <= 0 or r_y >= self.HEIGHT:
             r_y = None
         if r_z <= 0 or r_z >= self.DEPTH:
             r_z = None
+        if z == 0: # to cater for 2d images (normal camera, without depth)
+            r_z = self.DEPTH - 1
         if r_x is None or r_y is None or r_z is None:
             result = None
         else:
@@ -142,7 +145,7 @@ class Grid(object):
         elif grid_type == 'xz':
             grid = self.xz_grid
         grid_im = scv.Image(grid.transpose())
-        morphed = grid_im.erode(5)
+        morphed = grid_im.erode(10)
         return morphed
 
     def send_coordinates(self, osc_client):

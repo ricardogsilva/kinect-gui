@@ -9,6 +9,7 @@ import SimpleCV as scv
 from shapely.geometry import Polygon
 from mykinect import Kinect
 from grid import Grid, GridWarper
+from osccommunicator import OSCCommunicator
 
 class KinectNotDetectedError(Exception):
     pass
@@ -261,6 +262,17 @@ class Detector(object):
                     boundaries_to_update.append(pt)
         self.centroids_grid.update_grid(centroids_to_update)
         self.boundaries_grid.update_grid(boundaries_to_update)
+        self._add_grids_to_image_pipeline()
+
+    def _add_grids_to_image_pipeline(self):
+        c_xy_im = self.centroids_grid.get_image(grid_type='xy')
+        c_xz_im = self.centroids_grid.get_image(grid_type='xz')
+        b_xy_im = self.boundaries_grid.get_image(grid_type='xy')
+        b_xz_im = self.boundaries_grid.get_image(grid_type='xz')
+        self.image_pipeline['centroids_grid_xy'] = c_xy_im
+        self.image_pipeline['centroids_grid_xz'] = c_xz_im
+        self.image_pipeline['boundaries_grid_xy'] = b_xy_im
+        self.image_pipeline['boundaries_grid_xz'] = b_xz_im
 
     def get_results(self):
         results = dict()
@@ -270,9 +282,25 @@ class Detector(object):
                         'boundaries_grid' : self.boundaries_grid})
         return results
 
+    @classmethod
+    def detect_kinects(cls):
+        dev_number = 0
+        kinects = []
+        found = True
+        while found:
+            try:
+                k = Detector(dev_number)
+                kinects.append(k)
+                dev_number += 1
+            except:
+                found = False
+        return kinects
+
+
 if __name__ == '__main__':
     d = Detector()
     while True:
-        d.capture(depth=True, image=False)
-        d.detect(mode='depth')
+        d.capture(image=True)
+        d.detect(mode='image', centroids=True)
+        results = d.get_results()
 
