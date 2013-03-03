@@ -16,6 +16,7 @@ from shapely.prepared import prep
 import ui_multiplekinects
 import ui_oscsettings
 import detection
+from osccommunicator import OSCCommunicator
 
 try:
     _fromUtf8 = QString.fromUtf8
@@ -110,9 +111,8 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                         self.toggle_overlay_boundaries)
             self.connect(value['widgets']['OSC_settings_b'], SIGNAL('clicked()'),
                         self.set_osc_settings)
-        self.load_settings(kinects) # aqui
+        self.load_settings(kinects)
         self.restore_gui()
-
         #self.kinects[0]['widgets']['enable_kinect_cb'].setChecked(True)
         self.startTimer(35)
 
@@ -122,10 +122,16 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         for i, kinect in enumerate(kinects):
             default_detect_meth = self.DETECTION_METHODS.keys()[0]
             default_base_im = self.DETECTION_METHODS[default_detect_meth][0]
+            osc_client_ip = s.value('kinect%i/osc_server_ip' % i, 
+                                    QVariant('127.0.1.1')).toString()
+            osc_client_port = s.value('kinect%i/osc_server_port',
+                                      QVariant(5000)).toInt()[0]
             self.kinects[i].update({
                 'detector' : kinect,
                 'status' : s.value('kinect%i/status' % i, QVariant(False)).toBool(),
                 'send_osc' : s.value('kinect%i/send_osc' % i, QVariant(False)).toBool(),
+                'send_osc_centroids_grid' : s.value('kinect%i/send_osc_centroids_grid' % i, QVariant(False)).toBool(),
+                'send_osc_boundaries_grid' : s.value('kinect%i/send_osc_boundaries_grid' % i, QVariant(False)).toBool(),
                 'detection_method' : s.value('kinect%i/detection_method' % i,
                                              QVariant(default_detect_meth)).toString(),
                 'base_image' : s.value('kinect%i/base_image' % i,
@@ -133,8 +139,9 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                 'overlay_blobs' : s.value('kinect%i/overlay_blobs' % i, QVariant(False)).toBool(),
                 'overlay_centroids' : s.value('kinect%i/overlay_centroids' % i, QVariant(False)).toBool(),
                 'overlay_boundaries' : s.value('kinect%i/overlay_boundaries' % i, QVariant(False)).toBool(),
-                'osc_server_ip' : s.value('kinect%i/osc_server_ip' % i, QVariant(None)).toString(),
-                'osc_server_port' : s.value('kinect%i/osc_server_port' % i, QVariant(None)).toString(),
+                'osc_server_ip' : osc_client_ip,
+                'osc_server_port' : osc_client_port,
+                'osc_communicator' : OSCCommunicator(client_ip=osc_client_ip, client_port=osc_client_port),
             })
 
     def restore_gui(self):
@@ -169,6 +176,8 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
         for index, ks in self.kinects.iteritems():
             settings.setValue('kinect%i/status' % index, QVariant(ks['status']))
             settings.setValue('kinect%i/send_osc' % index, QVariant(ks['send_osc']))
+            settings.setValue('kinect%i/send_osc_centroids_grid' % index, QVariant(ks['send_osc_centroids_grid']))
+            settings.setValue('kinect%i/send_osc_boundaries_grid' % index, QVariant(ks['send_osc_boundaries_grid']))
             settings.setValue('kinect%i/detection_method' % index,
                               QVariant(ks['detection_method']))
             settings.setValue('kinect%i/base_image' % index,
@@ -185,13 +194,19 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                               QVariant(ks['osc_server_port']))
 
     def set_osc_settings(self):
-        index, settings = self._get_index_settings()
+        index, s = self._get_index_settings()
         dialog = OSCSettingsDlg(self)
-        dialog.osc_server_ip_le.setText(settings['osc_server_ip'])
-        dialog.osc_server_port_le.setText(settings['osc_server_port'])
+        dialog.osc_server_ip_le.setText(s['osc_server_ip'])
+        dialog.osc_server_port_le.setText(s['osc_server_port'])
         if dialog.exec_():
-            settings['osc_server_ip'] = dialog.osc_server_ip_le.text()
-            settings['osc_server_port'] = dialog.osc_server_port_le.text()
+            client_ip = dialog.osc_server_ip_le.text()
+            client_port = dialog.osc_server_port_le.text()
+            s['osc_server_ip'] = client_ip
+            s['osc_server_port'] = client_port
+            settings['osc_communicator'] = OSCCommunicator(
+                client_ip=client_ip,
+                client_port=client_port
+            )
 
     def toggle_enable_kinect(self, toggled):
         index, settings = self._get_index_settings()
@@ -249,6 +264,8 @@ class MultipleKinectsDlg(QDialog, ui_multiplekinects.Ui_MultipleKinectsDialog):
                               centroids=process_centroids,
                               boundaries=process_boundaries)
                 results = kinect.get_results()
+                if ks['send_osc']:
+                    kinect.send_osc_messages(ks['osc_communicator'])
                 if index == current_page:
                     self.update_display(ks, results)
 

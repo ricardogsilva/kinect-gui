@@ -1,9 +1,10 @@
 import OSC
+import socket
 
 class OSCCommunicator(object):
 
-    def __init__(self, server_ip, client_ip, 
-                 server_port=5000, client_port=8000,
+    def __init__(self, client_ip, server_ip=None,
+                 server_port=9000, client_port=8000,
                  send_OSC=True):
         '''
         Inputs:
@@ -20,6 +21,9 @@ class OSCCommunicator(object):
                 machine that will receive our sent OSC messages.
         '''
 
+        if server_ip is None:
+            #server_ip = self._find_own_ip(client_ip)
+            server_ip = '10.35.145.217' # just for testing
         self.server = OSC.OSCServer((server_ip, server_port))
         self.server.timeout = 0
         #self.server.addMsgHandler('/1/toggle1', self._print_msg)
@@ -27,6 +31,25 @@ class OSCCommunicator(object):
         self.client = OSC.OSCClient()
         self.client.connect((client_ip, client_port))
         self.send_OSC = send_OSC
+
+    def _find_own_ip(self, client_ip):
+        '''
+        Find this machine's own IP address.
+
+        This code is taken from:
+        http://stackoverflow.com/questions/7334349/python-get-local-ip-address-used-to-send-ip-data-to-a-specific-remote-ip-addres
+        '''
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((client_ip, 9))
+            own_ip = s.getsockname()[0]
+        except socket.error:
+            own_ip = None
+            raise
+        finally:
+            del s
+        return own_ip
 
     def send_message(self, address, *values):
         message = OSC.OSCMessage(address)

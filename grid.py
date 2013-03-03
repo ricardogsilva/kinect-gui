@@ -148,23 +148,36 @@ class Grid(object):
         morphed = grid_im.erode(10)
         return morphed
 
-    def send_coordinates(self, osc_client):
+    def get_points(self):
+        '''
+        Return the coordinates on the grids of points.
+        '''
         coords_xz = np.argwhere(self.xz_grid == self.DEPTH_VALUE_POINT)
         coords_xy = np.argwhere(self.xy_grid == self.DEPTH_VALUE_POINT)
-        print('coords_xz: %s' % coords_xz)
-        print('coords_xy: %s' % coords_xy)
-        num_points = coords_xz.shape[0]
-        if num_points > 0:
-            #coords = np.zeros((num_points, 3))
-            coords = []
-            coords.append(num_points)
-            for pt in range(num_points):
-                #coords[pt, 0] = coords_xz[pt, 1] / self.WIDTH
-                #coords[pt, 1] = coords_xy[pt, 0] / self.HEIGHT
-                #coords[pt, 2] = coords_xz[pt, 0] / self.DEPTH
-                coords.append(coords_xz[pt, 1] / self.WIDTH)
-                coords.append(coords_xy[pt, 0] / self.HEIGHT)
-                coords.append(coords_xz[pt, 0] / self.DEPTH)
-            print('coords: %s' % coords)
-            #osc_client.send_message('/topview/xyz', coords)
-            print('----------')
+        points = []
+        for pt in range(coords_xz.shape[0]):
+            x = coords_xz[pt, 1] / self.WIDTH
+            y = coords_xy[pt, 0] / self.HEIGHT
+            z = coords_xz[pt, 0] / self.DEPTH
+            points.append((x, y, z))
+
+    #def send_coordinates(self, osc_client, message_name):
+    #    coords_xz = np.argwhere(self.xz_grid == self.DEPTH_VALUE_POINT)
+    #    coords_xy = np.argwhere(self.xy_grid == self.DEPTH_VALUE_POINT)
+    #    print('coords_xz: %s' % coords_xz)
+    #    print('coords_xy: %s' % coords_xy)
+    #    num_points = coords_xz.shape[0]
+    #    if num_points > 0:
+    #        #coords = np.zeros((num_points, 3))
+    #        coords = []
+    #        coords.append(num_points)
+    #        for pt in range(num_points):
+    #            #coords[pt, 0] = coords_xz[pt, 1] / self.WIDTH
+    #            #coords[pt, 1] = coords_xy[pt, 0] / self.HEIGHT
+    #            #coords[pt, 2] = coords_xz[pt, 0] / self.DEPTH
+    #            coords.append(coords_xz[pt, 1] / self.WIDTH)
+    #            coords.append(coords_xy[pt, 0] / self.HEIGHT)
+    #            coords.append(coords_xz[pt, 0] / self.DEPTH)
+    #        print('coords: %s' % coords)
+    #        #osc_client.send_message(message_name, coords)
+    #        print('----------')

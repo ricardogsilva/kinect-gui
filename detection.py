@@ -282,6 +282,20 @@ class Detector(object):
                         'boundaries_grid' : self.boundaries_grid})
         return results
 
+    def send_centroid_grid_coordinates(self, osc_client,
+                                       message_name='/topview/centroids/xyz'):
+        grid_points = self.centroids_grid.get_points()
+        print('grid_points: %s' % grid_points)
+        num_points = len(grid_points)
+        if num_points > 0:
+            pass
+
+
+        self.centroids_grid.send_coordinates(osc_client)
+
+    def send_boundaries_grid_coordinates(self, osc_client):
+        self.boundaries_grid.send_coordinates(osc_client)
+
     @classmethod
     def detect_kinects(cls):
         dev_number = 0
